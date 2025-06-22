@@ -30,7 +30,7 @@ else:
     winreg = None
 
 
-TOKEN = ""
+TOKEN = "BOT_TOKEN"
 
 intents = discord.Intents.default()
 intents.message_content = True
