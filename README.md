@@ -106,6 +106,7 @@ Bu proje, sistem programlama ve güvenlik alanında bilgi edinmek isteyen geliş
 Discord: pqwok
 
 --- --- --- ---
+# EN - English
 
 # Discord Bot Project: System Management Tool
 
