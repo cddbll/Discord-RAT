@@ -1,5 +1,7 @@
 # Discord-RAT
 
+Discord: pqwok
+
 ---
 
 ## Uyarı
