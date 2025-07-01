@@ -8,7 +8,7 @@ Bu proje, Python programlama dili ve Discord API kullanılarak geliştirilmiş b
 
 ## Önemli Uyarı
 
-Bu proje yalnızca eğitim amaçlı olup, etik hackerlık ve sistem güvenliği alanında bilgi edinmek isteyenler için hazırlanmıştır. **Kullanıcılar kendi sorumluluklarında hareket etmelidirler.** Bu araç izinsiz sistemlere erişmek veya kötü niyetli amaçlarla kullanılmamalıdır. Yasa dışı kullanımlardan proje sahibi sorumlu tutulamaz.
+Bu proje yalnızca eğitim amaçlı olup, bilgi edinmek isteyenler için hazırlanmıştır. **Kullanıcılar kendi sorumluluklarında hareket etmelidirler.** Bu araç izinsiz sistemlere erişmek veya kötü niyetli amaçlarla kullanılmamalıdır. Yasa dışı kullanımlardan proje sahibi sorumlu tutulamaz.
 
 ## Kurulum Talimatları
 
