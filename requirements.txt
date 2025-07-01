@@ -1,0 +1,9 @@
+certifi
+discord.py
+cryptography
+psutil
+pyautogui
+mss
+pillow
+pyperclip
+requests
