@@ -26,7 +26,7 @@ from cryptography.hazmat.backends import default_backend
 import secrets
 import asyncio
 
-TOKEN = "MTM4Nzc5MDIwMzc1Mzg2MTEzMA.G4EGZt.EjlJgApqBuYBD1NcfEJNVqYGqrF8hphyNy_kXQ"
+TOKEN = "BOT_TOKEN"
 
 intents = discord.Intents.default()
 intents.message_content = True
