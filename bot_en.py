@@ -30,7 +30,7 @@ TOKEN = "BOT_TOKEN"
 
 intents = discord.Intents.default()
 intents.message_content = True
-bot = commands.Bot(command_prefix="!", intents=intents)
+bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 
 encrypted_count = 0
 count_lock = threading.Lock()
